@@ -144,3 +144,33 @@ def list_events(db: Session = Depends(get_db)):
 @app.get("/audit/verify")
 def verify(db: Session = Depends(get_db)):
     return verify_chain(db)
+
+from agent import propose
+
+
+class AgentIn(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/agent/run", status_code=201)
+def agent_run(body: AgentIn, db: Session = Depends(get_db)):
+    try:
+        proposal, mode = propose(body.instruction)
+        action = ActionIn(
+            agent="agent-ia",
+            action=proposal["action"],
+            payload=proposal.get("payload", {}),
+        )
+    except Exception:
+        append_event(
+            db, "agent-ia", "agent.sortie_invalide", {"instruction": body.instruction}
+        )
+        db.commit()
+        raise HTTPException(502, "Sortie de l'agent invalide : aucune action transmise")
+    append_event(
+        db,
+        "agent-ia",
+        "agent.proposition",
+        {"instruction": body.instruction, "mode": mode, "proposal": proposal},
+    )
+    return request_action(action, db)
