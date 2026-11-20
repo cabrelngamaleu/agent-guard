@@ -20,13 +20,43 @@ type Integrity = {
   broken_at_id: number | null;
 };
 
-const BADGE: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  allowed: "bg-green-100 text-green-800",
-  approved: "bg-green-100 text-green-800",
-  denied: "bg-red-100 text-red-800",
-  rejected: "bg-red-100 text-red-800",
+const STATUS: Record<string, { label: string; tone: string }> = {
+  allowed: { label: "Autorisée", tone: "ok" },
+  approved: { label: "Approuvée", tone: "ok" },
+  denied: { label: "Refusée", tone: "bad" },
+  rejected: { label: "Rejetée", tone: "bad" },
 };
+
+function formatValue(value: unknown): string {
+  if (typeof value === "number") return value.toLocaleString("fr-FR");
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Payload({ data }: { data: Record<string, unknown> }) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) return <span className="muted">—</span>;
+  return (
+    <dl className="payload">
+      {entries.map(([key, value]) => (
+        <div key={key}>
+          <dt>{key}</dt>
+          <dd>{formatValue(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export default function Home() {
   const [actions, setActions] = useState<ActionRequest[]>([]);
@@ -78,107 +108,138 @@ export default function Home() {
 
   const pending = actions.filter((a) => a.status === "pending");
   const history = actions.filter((a) => a.status !== "pending");
+  const count = (...statuses: string[]) =>
+    actions.filter((a) => statuses.includes(a.status)).length;
+  const figures: [string, number][] = [
+    ["En attente", pending.length],
+    ["Autorisées d'office", count("allowed")],
+    ["Approuvées", count("approved")],
+    ["Refusées ou rejetées", count("denied", "rejected")],
+  ];
 
   return (
-    <main className="min-h-screen bg-white text-slate-900">
-      <div className="mx-auto max-w-4xl p-6">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold">Agent Guard</h1>
-          {integrity && (
-            <span
-              className={`rounded-full px-3 py-1 text-sm font-medium ${
-                integrity.valid
-                  ? "bg-green-100 text-green-800"
-                  : "bg-red-100 text-red-800"
-              }`}
-            >
-              {integrity.valid
-                ? `Journal intègre (${integrity.checked} événements)`
-                : `Journal altéré à l'événement ${integrity.broken_at_id}`}
-            </span>
-          )}
-        </header>
-
-        {offline && (
-          <p className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
-            API injoignable : vérifiez que uvicorn tourne.
+    <div className="page">
+      <header className="masthead">
+        <div>
+          <p className="wordmark">Agent Guard</p>
+          <h1 className="title">Registre de contrôle des agents IA</h1>
+        </div>
+        {integrity && (
+          <p className={`seal ${integrity.valid ? "ok" : "bad"}`}>
+            <span className="dot" />
+            {integrity.valid
+              ? `Journal intègre · ${integrity.checked} événements`
+              : `Journal altéré · événement ${integrity.broken_at_id}`}
           </p>
         )}
-        {error && (
-          <p className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </p>
+      </header>
+
+      {offline && (
+        <p className="notice">API injoignable. Vérifiez que le serveur tourne.</p>
+      )}
+      {error && <p className="notice">{error}</p>}
+
+      <section className="figures">
+        {figures.map(([label, value]) => (
+          <div key={label}>
+            <p className="figure">{value}</p>
+            <p className="label">{label}</p>
+          </div>
+        ))}
+      </section>
+
+      <section>
+        <div className="section-head">
+          <h2>En attente de décision</h2>
+          <label className="field">
+            <span className="label">Approbateur</span>
+            <input
+              value={approver}
+              onChange={(e) => setApprover(e.target.value)}
+              placeholder="Votre nom"
+            />
+          </label>
+        </div>
+        {pending.length === 0 ? (
+          <p className="empty">Aucune demande en attente.</p>
+        ) : (
+          <ul className="queue">
+            {pending.map((a) => (
+              <li key={a.id}>
+                <span className="num">N° {a.id}</span>
+                <div>
+                  <p className="action">{a.action}</p>
+                  <Payload data={a.payload} />
+                  <p className="muted">
+                    {a.reason} · demandé par {a.agent} ·{" "}
+                    {formatTime(a.created_at)}
+                  </p>
+                </div>
+                <div className="buttons">
+                  <button
+                    className="primary"
+                    onClick={() => decide(a.id, "approve")}
+                  >
+                    Approuver
+                  </button>
+                  <button onClick={() => decide(a.id, "reject")}>Rejeter</button>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
+      </section>
 
-        <label className="mb-6 block text-sm font-medium">
-          Votre nom (approbateur)
-          <input
-            value={approver}
-            onChange={(e) => setApprover(e.target.value)}
-            className="mt-1 block w-64 rounded border border-slate-300 px-3 py-2"
-            placeholder="cabrel"
-          />
-        </label>
+      <section>
+        <div className="section-head">
+          <h2>Registre</h2>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>N°</th>
+                <th>Action</th>
+                <th>Détail</th>
+                <th>Agent</th>
+                <th>Statut</th>
+                <th>Décidé par</th>
+                <th>Horodatage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((a) => {
+                const s = STATUS[a.status] ?? { label: a.status, tone: "" };
+                return (
+                  <tr key={a.id}>
+                    <td className="mono">{a.id}</td>
+                    <td className="mono">{a.action}</td>
+                    <td>
+                      <Payload data={a.payload} />
+                    </td>
+                    <td>{a.agent}</td>
+                    <td>
+                      <span className={`status ${s.tone}`}>
+                        <span className="dot" />
+                        {s.label}
+                      </span>
+                      <p className="muted">{a.reason}</p>
+                    </td>
+                    <td>{a.decided_by ?? "—"}</td>
+                    <td className="mono">
+                      {formatTime(a.decided_at ?? a.created_at)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-        <h2 className="mb-3 text-lg font-semibold">
-          Demandes en attente ({pending.length})
-        </h2>
-        {pending.length === 0 && (
-          <p className="mb-6 text-sm text-slate-500">Aucune demande en attente.</p>
-        )}
-        <ul className="mb-8 space-y-3">
-          {pending.map((a) => (
-            <li key={a.id} className="rounded border border-slate-200 p-4">
-              <p className="font-medium">
-                #{a.id} · {a.action} · demandé par {a.agent}
-              </p>
-              <p className="mt-1 font-mono text-sm text-slate-600">
-                {JSON.stringify(a.payload)}
-              </p>
-              <p className="mt-1 text-sm text-slate-600">Motif : {a.reason}</p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => decide(a.id, "approve")}
-                  className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700"
-                >
-                  Approuver
-                </button>
-                <button
-                  onClick={() => decide(a.id, "reject")}
-                  className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-                >
-                  Rejeter
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <h2 className="mb-3 text-lg font-semibold">Historique</h2>
-        <ul className="space-y-2">
-          {history.map((a) => (
-            <li
-              key={a.id}
-              className="flex flex-wrap items-center gap-2 rounded border border-slate-200 p-3 text-sm"
-            >
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  BADGE[a.status] ?? "bg-slate-100 text-slate-700"
-                }`}
-              >
-                {a.status}
-              </span>
-              <span className="font-medium">
-                #{a.id} · {a.action}
-              </span>
-              <span className="text-slate-600">
-                {a.agent} · {a.reason}
-                {a.decided_by ? ` · décidé par ${a.decided_by}` : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </main>
+      <footer className="colophon">
+        Chaque décision est inscrite dans un journal chaîné par SHA-256.
+      </footer>
+    </div>
   );
 }
