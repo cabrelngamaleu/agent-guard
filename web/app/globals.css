@@ -361,3 +361,65 @@ td .payload {
     gap: 10px;
   }
 }
+/* Session et connexion */
+.masthead-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13.5px;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 13.5px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+button.link:hover {
+  background: transparent;
+  color: var(--bad);
+}
+
+.login {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 340px;
+  margin-top: 56px;
+}
+
+.login h2 {
+  font-size: 20px;
+}
+
+.login label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login .label {
+  margin: 0;
+}
+
+.login input {
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  border-radius: 0;
+}
+
+.login button {
+  align-self: flex-start;
+}

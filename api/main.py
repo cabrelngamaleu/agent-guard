@@ -185,3 +185,13 @@ def list_events(db: Session = Depends(get_db)):
 @app.get("/audit/verify")
 def verify(db: Session = Depends(get_db)):
     return verify_chain(db)
+
+from auth import current_user
+
+
+@app.get("/me")
+def me(user: dict = Depends(current_user)):
+    return {
+        "username": user["preferred_username"],
+        "roles": user.get("realm_access", {}).get("roles", []),
+    }
