@@ -214,3 +214,19 @@ def list_events(db: Session = Depends(get_db)):
 @app.get("/audit/verify", dependencies=[Depends(current_user)])
 def verify(db: Session = Depends(get_db)):
     return verify_chain(db)
+
+from audit import create_checkpoint
+
+
+@app.post("/audit/checkpoint", status_code=201)
+def checkpoint(
+    approver: str = Depends(require_approver),
+    db: Session = Depends(get_db),
+):
+    try:
+        cp = create_checkpoint(db, approver)
+    except ValueError:
+        raise HTTPException(409, "Journal vide : rien à sceller")
+    append_event(db, approver, "audit.scelle", {"last_id": cp["last_id"]})
+    db.commit()
+    return cp
