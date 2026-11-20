@@ -39,8 +39,7 @@ def append_event(db: Session, actor: str, action: str, payload: dict) -> AuditEv
         event_hash=compute_hash(prev_hash, created_at, actor, action, payload_txt),
     )
     db.add(event)
-    db.commit()
-    db.refresh(event)
+    db.flush()
     return event
 
 
