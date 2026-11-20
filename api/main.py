@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from agent import propose
 from audit import append_event, verify_chain
-from auth import require_approver
+from auth import current_user, require_agent, require_approver, roles_of
 from db import Base, SessionLocal, engine
 from models import ActionRequest, AuditEvent
 from policy import evaluate
@@ -32,7 +32,6 @@ def now() -> str:
 
 
 class ActionIn(BaseModel):
-    agent: str = Field(min_length=1, max_length=200)
     action: str = Field(min_length=1, max_length=200)
     payload: dict = {}
 
@@ -71,14 +70,13 @@ def action_to_dict(a: ActionRequest) -> dict:
     }
 
 
-@app.post("/actions", status_code=201)
-def request_action(body: ActionIn, db: Session = Depends(get_db)):
-    decision, reason = evaluate(body.action, body.payload)
+def submit_action(db: Session, agent: str, action: str, payload: dict) -> dict:
+    decision, reason = evaluate(action, payload)
     req = ActionRequest(
         created_at=now(),
-        agent=body.agent,
-        action=body.action,
-        payload=json.dumps(body.payload, sort_keys=True, ensure_ascii=False),
+        agent=agent,
+        action=action,
+        payload=json.dumps(payload, sort_keys=True, ensure_ascii=False),
         status=STATUS[decision],
         reason=reason,
     )
@@ -86,12 +84,12 @@ def request_action(body: ActionIn, db: Session = Depends(get_db)):
     db.flush()
     append_event(
         db,
-        body.agent,
+        agent,
         f"action.{STATUS[decision]}",
         {
             "request_id": req.id,
-            "action": body.action,
-            "payload": body.payload,
+            "action": action,
+            "payload": payload,
             "reason": reason,
         },
     )
@@ -99,7 +97,21 @@ def request_action(body: ActionIn, db: Session = Depends(get_db)):
     return action_to_dict(req)
 
 
-@app.get("/actions")
+@app.get("/me")
+def me(user: dict = Depends(current_user)):
+    return {"username": user["preferred_username"], "roles": roles_of(user)}
+
+
+@app.post("/actions", status_code=201)
+def request_action(
+    body: ActionIn,
+    agent: str = Depends(require_agent),
+    db: Session = Depends(get_db),
+):
+    return submit_action(db, agent, body.action, body.payload)
+
+
+@app.get("/actions", dependencies=[Depends(current_user)])
 def list_actions(status: str | None = None, db: Session = Depends(get_db)):
     query = select(ActionRequest).order_by(ActionRequest.id.desc())
     if status:
@@ -153,45 +165,37 @@ def reject(
 
 
 @app.post("/agent/run", status_code=201)
-def agent_run(body: AgentIn, db: Session = Depends(get_db)):
+def agent_run(
+    body: AgentIn,
+    agent: str = Depends(require_agent),
+    db: Session = Depends(get_db),
+):
     try:
         proposal, mode = propose(body.instruction)
-        action = ActionIn(
-            agent="agent-ia",
-            action=proposal["action"],
-            payload=proposal.get("payload", {}),
+        candidate = ActionIn(
+            action=proposal["action"], payload=proposal.get("payload", {})
         )
     except Exception:
         append_event(
-            db, "agent-ia", "agent.sortie_invalide", {"instruction": body.instruction}
+            db, agent, "agent.sortie_invalide", {"instruction": body.instruction}
         )
         db.commit()
         raise HTTPException(502, "Sortie de l'agent invalide : aucune action transmise")
     append_event(
         db,
-        "agent-ia",
+        agent,
         "agent.proposition",
         {"instruction": body.instruction, "mode": mode, "proposal": proposal},
     )
-    return request_action(action, db)
+    return submit_action(db, agent, candidate.action, candidate.payload)
 
 
-@app.get("/events")
+@app.get("/events", dependencies=[Depends(current_user)])
 def list_events(db: Session = Depends(get_db)):
     events = db.scalars(select(AuditEvent).order_by(AuditEvent.id))
     return [event_to_dict(e) for e in events]
 
 
-@app.get("/audit/verify")
+@app.get("/audit/verify", dependencies=[Depends(current_user)])
 def verify(db: Session = Depends(get_db)):
     return verify_chain(db)
-
-from auth import current_user
-
-
-@app.get("/me")
-def me(user: dict = Depends(current_user)):
-    return {
-        "username": user["preferred_username"],
-        "roles": user.get("realm_access", {}).get("roles", []),
-    }
