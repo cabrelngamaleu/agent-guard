@@ -6,12 +6,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agent import propose
+from agent import AgentError, propose
 from audit import append_event, verify_chain
 from auth import current_user, require_agent, require_approver, roles_of
 from db import Base, SessionLocal, engine
 from models import ActionRequest, AuditEvent
 from policy import evaluate
+from privacy import mask, unmask
 
 Base.metadata.create_all(engine)
 app = FastAPI(title="Agent Guard")
@@ -170,14 +171,23 @@ def agent_run(
     agent: str = Depends(require_agent),
     db: Session = Depends(get_db),
 ):
+    # Le modèle externe ne reçoit que le texte masqué
+    masked, mapping = mask(body.instruction)
+    raw, cause = "", "proposition_mal_formee"
     try:
-        proposal, mode = propose(body.instruction)
+        proposal, mode, raw = propose(masked)
         candidate = ActionIn(
-            action=proposal["action"], payload=proposal.get("payload", {})
+            action=proposal["action"],
+            payload=unmask(proposal.get("payload", {}), mapping),
         )
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, AgentError):
+            cause, raw = exc.kind, exc.raw
         append_event(
-            db, agent, "agent.sortie_invalide", {"instruction": body.instruction}
+            db,
+            agent,
+            "agent.sortie_invalide",
+            {"instruction": masked, "cause": cause, "sortie_brute": raw},
         )
         db.commit()
         raise HTTPException(502, "Sortie de l'agent invalide : aucune action transmise")
@@ -185,7 +195,12 @@ def agent_run(
         db,
         agent,
         "agent.proposition",
-        {"instruction": body.instruction, "mode": mode, "proposal": proposal},
+        {
+            "instruction": masked,
+            "donnees_masquees": len(mapping),
+            "mode": mode,
+            "proposal": proposal,
+        },
     )
     return submit_action(db, agent, candidate.action, candidate.payload)
 
