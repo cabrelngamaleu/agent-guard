@@ -423,3 +423,73 @@ button.link:hover {
 .login button {
   align-self: flex-start;
 }
+/* Dossier de preuves */
+.navlink {
+  color: inherit;
+  font-size: 13.5px;
+  text-underline-offset: 3px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lead {
+  margin-top: 24px;
+  color: var(--muted);
+}
+
+.kv > div {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.kv dt {
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.hash {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .kv > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    font-size: 12px;
+  }
+
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+
+  tr,
+  .kv > div {
+    break-inside: avoid;
+  }
+}

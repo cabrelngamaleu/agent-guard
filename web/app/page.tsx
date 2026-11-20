@@ -177,6 +177,7 @@ export default function Home() {
               <span>
                 {user.username} · {canDecide ? "approbateur" : "lecture seule"}
               </span>
+               <a className="navlink" href="/rapport">Dossier de preuves</a>
               <button className="link" onClick={logout}>
                 Se déconnecter
               </button>

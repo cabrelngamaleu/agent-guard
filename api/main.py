@@ -230,3 +230,16 @@ def checkpoint(
     append_event(db, approver, "audit.scelle", {"last_id": cp["last_id"]})
     db.commit()
     return cp
+
+from evidence import build_evidence
+
+
+@app.post("/audit/evidence")
+def evidence(
+    approver: str = Depends(require_approver),
+    db: Session = Depends(get_db),
+):
+    pack = build_evidence(db, approver)
+    append_event(db, approver, "audit.dossier_genere", {"sha256": pack["sha256"]})
+    db.commit()
+    return pack
