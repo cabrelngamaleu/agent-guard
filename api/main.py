@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from agent import propose
 from audit import append_event, verify_chain
+from auth import require_approver
 from db import Base, SessionLocal, engine
 from models import ActionRequest, AuditEvent
 from policy import evaluate
@@ -36,8 +38,11 @@ class ActionIn(BaseModel):
 
 
 class DecisionIn(BaseModel):
-    approver: str = Field(min_length=1, max_length=200)
     comment: str = Field(default="", max_length=300)
+
+
+class AgentIn(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)
 
 
 def event_to_dict(e: AuditEvent) -> dict:
@@ -102,7 +107,9 @@ def list_actions(status: str | None = None, db: Session = Depends(get_db)):
     return [action_to_dict(a) for a in db.scalars(query)]
 
 
-def decide(request_id: int, body: DecisionIn, new_status: str, db: Session) -> dict:
+def decide(
+    request_id: int, approver: str, comment: str, new_status: str, db: Session
+) -> dict:
     req = db.scalars(
         select(ActionRequest).where(ActionRequest.id == request_id).with_for_update()
     ).first()
@@ -110,46 +117,39 @@ def decide(request_id: int, body: DecisionIn, new_status: str, db: Session) -> d
         raise HTTPException(404, "Demande introuvable")
     if req.status != "pending":
         raise HTTPException(409, f"Demande déjà traitée ({req.status})")
-    if body.approver == req.agent:
+    if approver == req.agent:
         raise HTTPException(403, "Le demandeur ne peut pas valider sa propre demande")
     req.status = new_status
-    req.decided_by = body.approver
+    req.decided_by = approver
     req.decided_at = now()
     append_event(
         db,
-        body.approver,
+        approver,
         f"action.{new_status}",
-        {"request_id": req.id, "comment": body.comment},
+        {"request_id": req.id, "comment": comment},
     )
     db.commit()
     return action_to_dict(req)
 
 
 @app.post("/actions/{request_id}/approve")
-def approve(request_id: int, body: DecisionIn, db: Session = Depends(get_db)):
-    return decide(request_id, body, "approved", db)
+def approve(
+    request_id: int,
+    body: DecisionIn,
+    approver: str = Depends(require_approver),
+    db: Session = Depends(get_db),
+):
+    return decide(request_id, approver, body.comment, "approved", db)
 
 
 @app.post("/actions/{request_id}/reject")
-def reject(request_id: int, body: DecisionIn, db: Session = Depends(get_db)):
-    return decide(request_id, body, "rejected", db)
-
-
-@app.get("/events")
-def list_events(db: Session = Depends(get_db)):
-    events = db.scalars(select(AuditEvent).order_by(AuditEvent.id))
-    return [event_to_dict(e) for e in events]
-
-
-@app.get("/audit/verify")
-def verify(db: Session = Depends(get_db)):
-    return verify_chain(db)
-
-from agent import propose
-
-
-class AgentIn(BaseModel):
-    instruction: str = Field(min_length=1, max_length=1000)
+def reject(
+    request_id: int,
+    body: DecisionIn,
+    approver: str = Depends(require_approver),
+    db: Session = Depends(get_db),
+):
+    return decide(request_id, approver, body.comment, "rejected", db)
 
 
 @app.post("/agent/run", status_code=201)
@@ -174,3 +174,14 @@ def agent_run(body: AgentIn, db: Session = Depends(get_db)):
         {"instruction": body.instruction, "mode": mode, "proposal": proposal},
     )
     return request_action(action, db)
+
+
+@app.get("/events")
+def list_events(db: Session = Depends(get_db)):
+    events = db.scalars(select(AuditEvent).order_by(AuditEvent.id))
+    return [event_to_dict(e) for e in events]
+
+
+@app.get("/audit/verify")
+def verify(db: Session = Depends(get_db)):
+    return verify_chain(db)
